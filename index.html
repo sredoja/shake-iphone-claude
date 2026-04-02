@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <title>Snake</title>
+  <title>Games</title>
   <style>
     * {
       margin: 0;
@@ -60,9 +60,9 @@
       aspect-ratio: 1;
       overflow: hidden;
       image-rendering: pixelated;
+      transition: aspect-ratio 0.15s;
     }
 
-    /* Nokia screen scanlines effect */
     .screen::after {
       content: '';
       position: absolute;
@@ -95,10 +95,6 @@
       letter-spacing: 1px;
       padding: 0 4px;
       text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-    }
-
-    .brand {
-      display: none;
     }
 
     .dpad {
@@ -173,26 +169,20 @@
     }
 
     .action-btn:active {
-      transform: translateY(2px);
+      transform: translateY(3px);
       box-shadow: 0 1px 0 #1a1a1a;
-    }
-
-    .nokia-logo {
-      display: none;
     }
   </style>
 </head>
 <body>
 
 <div class="phone-frame">
-  <div class="brand">NOKIA</div>
-
   <div class="screen-bezel">
     <div class="score-bar">
       <span id="scoreDisplay">SCORE: 0</span>
       <span id="levelDisplay">LVL: 1</span>
     </div>
-    <div class="screen">
+    <div class="screen" id="screen">
       <canvas id="gameCanvas"></canvas>
     </div>
   </div>
@@ -215,384 +205,657 @@
     <button class="action-btn" id="btnMenu">MENU</button>
     <button class="action-btn" id="btnStart">START</button>
   </div>
-
-  <div class="nokia-logo">NOKIA</div>
 </div>
 
 <script>
-  const canvas = document.getElementById('gameCanvas');
-  const ctx = canvas.getContext('2d');
+// ─── Canvas & shared ──────────────────────────────────────────────────────────
+const canvas = document.getElementById('gameCanvas');
+const ctx    = canvas.getContext('2d');
+const screen = document.getElementById('screen');
 
-  const GRID = 20;
-  canvas.width = GRID * GRID;
-  canvas.height = GRID * GRID;
+const C = {
+  bg:     '#9bbc0f',
+  bgDark: '#8bac0f',
+  dark:   '#0f380f',
+  mid:    '#306230',
+  light:  '#9bbc0f',
+};
 
-  // Nokia-style palette
-  const COLOR = {
-    bg: '#9bbc0f',
-    bgDark: '#8bac0f',
-    grid: '#8bac0f',
-    snake: '#0f380f',
-    snakeHead: '#0f380f',
-    food: '#0f380f',
-    text: '#0f380f',
-    textBg: '#9bbc0f',
-    border: '#306230',
-  };
+// ─── Global state ─────────────────────────────────────────────────────────────
+// 'menu' | 'snake' | 'tetris'
+let currentGame = 'menu';
+let menuSel = 0; // 0=snake, 1=tetris
 
-  let snake, dir, nextDir, food, score, highScore, gameLoop, state, level, stepInterval;
-  // state: 'start' | 'playing' | 'paused' | 'gameover'
-
-  highScore = parseInt(localStorage.getItem('snakeHighScore') || '0');
-
-  function init() {
-    snake = [
-      { x: 10, y: 10 },
-      { x: 9,  y: 10 },
-      { x: 8,  y: 10 },
-    ];
-    dir = { x: 1, y: 0 };
-    nextDir = { x: 1, y: 0 };
-    score = 0;
-    level = 1;
-    stepInterval = 180;
-    spawnFood();
-    updateHUD();
+function setCanvasMode(mode) {
+  if (mode === 'tetris') {
+    canvas.width  = 300;
+    canvas.height = 400;
+    screen.style.aspectRatio = '3/4';
+  } else {
+    canvas.width  = 400;
+    canvas.height = 400;
+    screen.style.aspectRatio = '1';
   }
+}
 
-  function spawnFood() {
-    let pos;
-    do {
-      pos = {
-        x: Math.floor(Math.random() * GRID),
-        y: Math.floor(Math.random() * GRID),
-      };
-    } while (snake.some(s => s.x === pos.x && s.y === pos.y));
-    food = pos;
-  }
+// ─── HUD ──────────────────────────────────────────────────────────────────────
+function setHUD(score, level) {
+  document.getElementById('scoreDisplay').textContent = `SCORE: ${score}`;
+  document.getElementById('levelDisplay').textContent = `LVL: ${level}`;
+}
 
-  function step() {
-    dir = { ...nextDir };
+// ─── Overlay helper ──────────────────────────────────────────────────────────
+function drawBox(title, lines) {
+  ctx.fillStyle = 'rgba(139,172,15,0.88)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const head = {
-      x: (snake[0].x + dir.x + GRID) % GRID,
-      y: (snake[0].y + dir.y + GRID) % GRID,
-    };
+  const bw = Math.min(canvas.width - 20, 240);
+  const bh = lines.length * 22 + 52;
+  const bx = (canvas.width  - bw) / 2;
+  const by = (canvas.height - bh) / 2;
 
-    // Wall collision (solid walls instead of wrap)
-    if (head.x < 0 || head.x >= GRID || head.y < 0 || head.y >= GRID) {
-      endGame();
-      return;
-    }
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.strokeStyle = C.dark;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(bx, by, bw, bh);
+  ctx.lineWidth = 1;
+  ctx.strokeRect(bx + 4, by + 4, bw - 8, bh - 8);
 
-    // Self collision
-    if (snake.some(s => s.x === head.x && s.y === head.y)) {
-      endGame();
-      return;
-    }
+  ctx.fillStyle = C.dark;
+  ctx.font = 'bold 17px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(title, canvas.width / 2, by + 30);
 
-    snake.unshift(head);
+  ctx.font = '13px "Courier New", monospace';
+  lines.forEach((l, i) => ctx.fillText(l, canvas.width / 2, by + 52 + i * 22));
+  ctx.textAlign = 'left';
+}
 
-    if (head.x === food.x && head.y === food.y) {
-      score++;
-      // Level up every 5 foods
-      level = Math.floor(score / 5) + 1;
-      stepInterval = Math.max(60, 180 - (level - 1) * 18);
-      updateHUD();
-      spawnFood();
-      // Restart loop with new interval
-      clearInterval(gameLoop);
-      gameLoop = setInterval(step, stepInterval);
+// ═══════════════════════════════════════════════════════════════════════════════
+// MENU
+// ═══════════════════════════════════════════════════════════════════════════════
+const MENU_ITEMS = ['SNAKE', 'TETRIS'];
+
+function drawMenu() {
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // border
+  ctx.strokeStyle = C.mid;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+
+  // Title
+  ctx.fillStyle = C.dark;
+  ctx.font = 'bold 28px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('JOGOS', canvas.width / 2, 90);
+
+  ctx.font = '11px "Courier New", monospace';
+  ctx.fillText('Escolha um jogo', canvas.width / 2, 115);
+
+  // Menu items
+  MENU_ITEMS.forEach((name, i) => {
+    const ix = canvas.width / 2;
+    const iy = 180 + i * 64;
+    const bw = 180, bh = 44;
+    const bx = ix - bw / 2;
+    const by = iy - bh / 2;
+
+    if (i === menuSel) {
+      ctx.fillStyle = C.dark;
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.fillStyle = C.bg;
     } else {
-      snake.pop();
+      ctx.fillStyle = C.bg;
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = C.dark;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.fillStyle = C.dark;
     }
 
-    draw();
-  }
-
-  function draw() {
-    // Background
-    ctx.fillStyle = COLOR.bg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Subtle grid
-    ctx.strokeStyle = COLOR.grid;
-    ctx.lineWidth = 0.3;
-    for (let i = 0; i <= GRID; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * GRID, 0);
-      ctx.lineTo(i * GRID, canvas.height);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, i * GRID);
-      ctx.lineTo(canvas.width, i * GRID);
-      ctx.stroke();
-    }
-
-    // Border
-    ctx.strokeStyle = COLOR.border;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
-
-    // Food - blinking dot Nokia style
-    const blink = Math.floor(Date.now() / 400) % 2;
-    if (blink || state !== 'playing') {
-      ctx.fillStyle = COLOR.food;
-      const fx = food.x * GRID;
-      const fy = food.y * GRID;
-      // Nokia food: small square with dot pattern
-      ctx.fillRect(fx + 3, fy + 3, GRID - 6, GRID - 6);
-    }
-
-    // Snake
-    snake.forEach((seg, i) => {
-      const x = seg.x * GRID;
-      const y = seg.y * GRID;
-      ctx.fillStyle = COLOR.snake;
-      if (i === 0) {
-        // Head - slightly different
-        ctx.fillRect(x + 1, y + 1, GRID - 2, GRID - 2);
-        // Eyes
-        ctx.fillStyle = COLOR.bg;
-        const ex = dir.x, ey = dir.y;
-        if (ex === 1) { // right
-          ctx.fillRect(x + GRID - 5, y + 3, 2, 2);
-          ctx.fillRect(x + GRID - 5, y + GRID - 5, 2, 2);
-        } else if (ex === -1) { // left
-          ctx.fillRect(x + 3, y + 3, 2, 2);
-          ctx.fillRect(x + 3, y + GRID - 5, 2, 2);
-        } else if (ey === -1) { // up
-          ctx.fillRect(x + 3, y + 3, 2, 2);
-          ctx.fillRect(x + GRID - 5, y + 3, 2, 2);
-        } else { // down
-          ctx.fillRect(x + 3, y + GRID - 5, 2, 2);
-          ctx.fillRect(x + GRID - 5, y + GRID - 5, 2, 2);
-        }
-      } else {
-        // Body segment - classic Nokia chunky style
-        ctx.fillRect(x + 1, y + 1, GRID - 2, GRID - 2);
-        // Inner highlight
-        ctx.fillStyle = COLOR.bgDark;
-        ctx.fillRect(x + 4, y + 4, GRID - 8, GRID - 8);
-        ctx.fillStyle = COLOR.snake;
-      }
-    });
-  }
-
-  function drawOverlay(title, lines) {
-    // Semi-transparent overlay
-    ctx.fillStyle = 'rgba(139, 172, 15, 0.85)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Box
-    const bw = 240, bh = lines.length * 22 + 50;
-    const bx = (canvas.width - bw) / 2;
-    const by = (canvas.height - bh) / 2;
-
-    ctx.fillStyle = COLOR.bg;
-    ctx.fillRect(bx, by, bw, bh);
-    ctx.strokeStyle = COLOR.text;
-    ctx.lineWidth = 3;
-    ctx.strokeRect(bx, by, bw, bh);
-    // Inner border
-    ctx.lineWidth = 1;
-    ctx.strokeRect(bx + 4, by + 4, bw - 8, bh - 8);
-
-    ctx.fillStyle = COLOR.text;
-    ctx.font = 'bold 18px "Courier New", monospace';
+    ctx.font = 'bold 20px "Courier New", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(title, canvas.width / 2, by + 30);
-
-    ctx.font = '13px "Courier New", monospace';
-    lines.forEach((line, i) => {
-      ctx.fillText(line, canvas.width / 2, by + 52 + i * 22);
-    });
-    ctx.textAlign = 'left';
-  }
-
-  function drawStart() {
-    draw();
-    drawOverlay('SNAKE', [
-      'Pressione OK',
-      'ou START',
-      'para jogar',
-      '',
-      `RECORDE: ${highScore}`,
-    ]);
-  }
-
-  function drawPaused() {
-    draw();
-    drawOverlay('PAUSADO', [
-      'Pressione OK',
-      'para continuar',
-    ]);
-  }
-
-  function drawGameOver() {
-    draw();
-    drawOverlay('FIM DE JOGO', [
-      `PONTOS: ${score}`,
-      `RECORDE: ${highScore}`,
-      '',
-      'Pressione OK',
-      'para jogar de',
-      'novo',
-    ]);
-  }
-
-  function updateHUD() {
-    document.getElementById('scoreDisplay').textContent = `SCORE: ${score}`;
-    document.getElementById('levelDisplay').textContent = `LVL: ${level}`;
-  }
-
-  function startGame() {
-    if (state === 'playing') return;
-    init();
-    state = 'playing';
-    clearInterval(gameLoop);
-    gameLoop = setInterval(step, stepInterval);
-    draw();
-  }
-
-  function pauseGame() {
-    if (state !== 'playing') return;
-    state = 'paused';
-    clearInterval(gameLoop);
-    drawPaused();
-  }
-
-  function resumeGame() {
-    if (state !== 'paused') return;
-    state = 'playing';
-    gameLoop = setInterval(step, stepInterval);
-    draw();
-  }
-
-  function endGame() {
-    clearInterval(gameLoop);
-    state = 'gameover';
-    if (score > highScore) {
-      highScore = score;
-      localStorage.setItem('snakeHighScore', highScore);
-    }
-    drawGameOver();
-  }
-
-  function handleOK() {
-    if (state === 'start' || state === 'gameover') {
-      startGame();
-    } else if (state === 'playing') {
-      pauseGame();
-    } else if (state === 'paused') {
-      resumeGame();
-    }
-  }
-
-  // Keyboard controls
-  document.addEventListener('keydown', e => {
-    switch (e.key) {
-      case 'ArrowUp':    case 'w': case 'W':
-        e.preventDefault();
-        if (dir.y !== 1)  nextDir = { x: 0, y: -1 };
-        break;
-      case 'ArrowDown':  case 's': case 'S':
-        e.preventDefault();
-        if (dir.y !== -1) nextDir = { x: 0, y: 1 };
-        break;
-      case 'ArrowLeft':  case 'a': case 'A':
-        e.preventDefault();
-        if (dir.x !== 1)  nextDir = { x: -1, y: 0 };
-        break;
-      case 'ArrowRight': case 'd': case 'D':
-        e.preventDefault();
-        if (dir.x !== -1) nextDir = { x: 1, y: 0 };
-        break;
-      case 'Enter': case ' ':
-        e.preventDefault();
-        handleOK();
-        break;
-      case 'p': case 'P':
-        if (state === 'playing') pauseGame();
-        else if (state === 'paused') resumeGame();
-        break;
-    }
+    ctx.fillText(name, ix, iy + 7);
   });
 
-  // D-pad buttons
-  function setupBtn(id, action) {
-    const btn = document.getElementById(id);
-    if (!btn) return;
-    ['touchstart', 'mousedown'].forEach(ev => {
-      btn.addEventListener(ev, e => {
-        e.preventDefault();
-        btn.classList.add('pressed');
-        action();
-      });
-    });
-    ['touchend', 'mouseup', 'mouseleave'].forEach(ev => {
-      btn.addEventListener(ev, () => btn.classList.remove('pressed'));
-    });
+  // hint
+  ctx.fillStyle = C.mid;
+  ctx.font = '11px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('▲▼ navegar   OK jogar', canvas.width / 2, canvas.height - 20);
+
+  ctx.textAlign = 'left';
+}
+
+function menuUp()   { menuSel = (menuSel - 1 + MENU_ITEMS.length) % MENU_ITEMS.length; drawMenu(); }
+function menuDown() { menuSel = (menuSel + 1) % MENU_ITEMS.length; drawMenu(); }
+
+function menuConfirm() {
+  if (menuSel === 0) launchSnake();
+  else               launchTetris();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SNAKE
+// ═══════════════════════════════════════════════════════════════════════════════
+const SN_GRID = 20;
+let snState, snSnake, snDir, snNextDir, snFood, snScore, snHighScore, snLevel, snInterval, snLoop;
+snHighScore = parseInt(localStorage.getItem('snakeHi') || '0');
+
+function launchSnake() {
+  currentGame = 'snake';
+  setCanvasMode('snake');
+  snState = 'start';
+  snInit();
+  snDrawStart();
+}
+
+function snInit() {
+  snSnake = [{x:10,y:10},{x:9,y:10},{x:8,y:10}];
+  snDir     = {x:1,y:0};
+  snNextDir = {x:1,y:0};
+  snScore   = 0;
+  snLevel   = 1;
+  snInterval = 180;
+  snSpawnFood();
+  setHUD(snScore, snLevel);
+}
+
+function snSpawnFood() {
+  let p;
+  do { p = {x: Math.floor(Math.random()*SN_GRID), y: Math.floor(Math.random()*SN_GRID)}; }
+  while (snSnake.some(s => s.x===p.x && s.y===p.y));
+  snFood = p;
+}
+
+function snStep() {
+  snDir = {...snNextDir};
+  const head = {
+    x: (snSnake[0].x + snDir.x + SN_GRID) % SN_GRID,
+    y: (snSnake[0].y + snDir.y + SN_GRID) % SN_GRID,
+  };
+  if (head.x < 0 || head.x >= SN_GRID || head.y < 0 || head.y >= SN_GRID) { snEnd(); return; }
+  if (snSnake.some(s => s.x===head.x && s.y===head.y))                     { snEnd(); return; }
+
+  snSnake.unshift(head);
+  if (head.x === snFood.x && head.y === snFood.y) {
+    snScore++;
+    snLevel    = Math.floor(snScore / 5) + 1;
+    snInterval = Math.max(60, 180 - (snLevel - 1) * 18);
+    setHUD(snScore, snLevel);
+    snSpawnFood();
+    clearInterval(snLoop);
+    snLoop = setInterval(snStep, snInterval);
+  } else {
+    snSnake.pop();
+  }
+  snDraw();
+}
+
+function snDraw() {
+  const CELL = canvas.width / SN_GRID;
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // grid
+  ctx.strokeStyle = C.bgDark;
+  ctx.lineWidth = 0.3;
+  for (let i = 0; i <= SN_GRID; i++) {
+    ctx.beginPath(); ctx.moveTo(i*CELL,0); ctx.lineTo(i*CELL,canvas.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,i*CELL); ctx.lineTo(canvas.width,i*CELL); ctx.stroke();
+  }
+  ctx.strokeStyle = C.mid; ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, canvas.width-2, canvas.height-2);
+
+  // food blink
+  const blink = Math.floor(Date.now()/400) % 2;
+  if (blink || snState !== 'playing') {
+    ctx.fillStyle = C.dark;
+    ctx.fillRect(snFood.x*CELL+3, snFood.y*CELL+3, CELL-6, CELL-6);
   }
 
-  setupBtn('btnUp',    () => { if (state === 'playing' && dir.y !== 1)  nextDir = { x: 0, y: -1 }; });
-  setupBtn('btnDown',  () => { if (state === 'playing' && dir.y !== -1) nextDir = { x: 0, y: 1 }; });
-  setupBtn('btnLeft',  () => { if (state === 'playing' && dir.x !== 1)  nextDir = { x: -1, y: 0 }; });
-  setupBtn('btnRight', () => { if (state === 'playing' && dir.x !== -1) nextDir = { x: 1, y: 0 }; });
-  setupBtn('btnCenter', handleOK);
-  setupBtn('btnStart',  handleOK);
-  setupBtn('btnMenu', () => {
-    if (state === 'playing') pauseGame();
-    else if (state === 'paused') resumeGame();
-  });
-
-  // Swipe / touch controls on canvas
-  let touchStart = null;
-  canvas.addEventListener('touchstart', e => {
-    e.preventDefault();
-    touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-  }, { passive: false });
-
-  canvas.addEventListener('touchend', e => {
-    e.preventDefault();
-    if (!touchStart) return;
-    const dx = e.changedTouches[0].clientX - touchStart.x;
-    const dy = e.changedTouches[0].clientY - touchStart.y;
-    const adx = Math.abs(dx), ady = Math.abs(dy);
-
-    if (adx < 10 && ady < 10) {
-      handleOK();
-      return;
-    }
-
-    if (state !== 'playing') {
-      handleOK();
-      return;
-    }
-
-    if (adx > ady) {
-      if (dx > 0 && dir.x !== -1) nextDir = { x: 1,  y: 0 };
-      else if (dx < 0 && dir.x !== 1) nextDir = { x: -1, y: 0 };
+  // snake
+  snSnake.forEach((seg, i) => {
+    const x = seg.x * CELL, y = seg.y * CELL;
+    ctx.fillStyle = C.dark;
+    ctx.fillRect(x+1, y+1, CELL-2, CELL-2);
+    if (i === 0) {
+      ctx.fillStyle = C.bg;
+      const d = snDir;
+      if      (d.x===1)  { ctx.fillRect(x+CELL-5,y+3,2,2); ctx.fillRect(x+CELL-5,y+CELL-5,2,2); }
+      else if (d.x===-1) { ctx.fillRect(x+3,y+3,2,2);      ctx.fillRect(x+3,y+CELL-5,2,2); }
+      else if (d.y===-1) { ctx.fillRect(x+3,y+3,2,2);      ctx.fillRect(x+CELL-5,y+3,2,2); }
+      else               { ctx.fillRect(x+3,y+CELL-5,2,2); ctx.fillRect(x+CELL-5,y+CELL-5,2,2); }
     } else {
-      if (dy > 0 && dir.y !== -1) nextDir = { x: 0, y: 1  };
-      else if (dy < 0 && dir.y !== 1) nextDir = { x: 0, y: -1 };
+      ctx.fillStyle = C.bgDark;
+      ctx.fillRect(x+4, y+4, CELL-8, CELL-8);
+    }
+  });
+}
+
+function snDrawStart()    { snDraw(); drawBox('SNAKE',    ['Pressione OK','ou START','para jogar','',`RECORDE: ${snHighScore}`]); }
+function snDrawPaused()   { snDraw(); drawBox('PAUSADO',  ['Pressione OK','para continuar']); }
+function snDrawGameOver() { snDraw(); drawBox('FIM DE JOGO',[`PONTOS: ${snScore}`,`RECORDE: ${snHighScore}`,'','Pressione OK','para jogar de','novo']); }
+
+function snStart() {
+  if (snState === 'playing') return;
+  snInit();
+  snState = 'playing';
+  clearInterval(snLoop);
+  snLoop = setInterval(snStep, snInterval);
+  snDraw();
+}
+function snPause()  { if (snState!=='playing') return; snState='paused'; clearInterval(snLoop); snDrawPaused(); }
+function snResume() { if (snState!=='paused')  return; snState='playing'; snLoop=setInterval(snStep,snInterval); snDraw(); }
+function snEnd()    {
+  clearInterval(snLoop);
+  snState = 'gameover';
+  if (snScore > snHighScore) { snHighScore = snScore; localStorage.setItem('snakeHi', snHighScore); }
+  snDrawGameOver();
+}
+function snOK() {
+  if (snState==='start'||snState==='gameover') snStart();
+  else if (snState==='playing') snPause();
+  else if (snState==='paused')  snResume();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TETRIS
+// ═══════════════════════════════════════════════════════════════════════════════
+const TET_COLS = 10, TET_ROWS = 20, TET_CELL = 20;
+const TET_BX = 0;   // board left x on canvas
+const TET_INFO_X = TET_COLS * TET_CELL + 4; // 204
+
+const PIECES = [
+  { shape: [[1,1,1,1]],           name:'I' },
+  { shape: [[1,1],[1,1]],         name:'O' },
+  { shape: [[0,1,0],[1,1,1]],     name:'T' },
+  { shape: [[0,1,1],[1,1,0]],     name:'S' },
+  { shape: [[1,1,0],[0,1,1]],     name:'Z' },
+  { shape: [[1,0,0],[1,1,1]],     name:'J' },
+  { shape: [[0,0,1],[1,1,1]],     name:'L' },
+];
+
+let tetState, tetBoard, tetPiece, tetNext, tetScore, tetHighScore, tetLevel, tetLines, tetInterval, tetLoop, tetLockTimer;
+tetHighScore = parseInt(localStorage.getItem('tetrisHi') || '0');
+
+function launchTetris() {
+  currentGame = 'tetris';
+  setCanvasMode('tetris');
+  tetState = 'start';
+  tetInitBoard();
+  setHUD(0, 1);
+  tetDrawStart();
+}
+
+function tetInitBoard() {
+  tetBoard = Array.from({length: TET_ROWS}, () => new Array(TET_COLS).fill(0));
+}
+
+function tetRandomPiece() {
+  const p = PIECES[Math.floor(Math.random() * PIECES.length)];
+  return {
+    shape: p.shape.map(r => [...r]),
+    x: Math.floor((TET_COLS - p.shape[0].length) / 2),
+    y: 0,
+  };
+}
+
+function tetRotate(shape) {
+  const rows = shape.length, cols = shape[0].length;
+  const result = Array.from({length: cols}, () => new Array(rows).fill(0));
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++)
+      result[c][rows - 1 - r] = shape[r][c];
+  return result;
+}
+
+function tetValid(shape, ox, oy) {
+  for (let r = 0; r < shape.length; r++)
+    for (let c = 0; c < shape[r].length; c++)
+      if (shape[r][c]) {
+        const nx = ox + c, ny = oy + r;
+        if (nx < 0 || nx >= TET_COLS || ny >= TET_ROWS) return false;
+        if (ny >= 0 && tetBoard[ny][nx]) return false;
+      }
+  return true;
+}
+
+function tetLock() {
+  for (let r = 0; r < tetPiece.shape.length; r++)
+    for (let c = 0; c < tetPiece.shape[r].length; c++)
+      if (tetPiece.shape[r][c]) {
+        const ny = tetPiece.y + r;
+        if (ny < 0) { tetEnd(); return; }
+        tetBoard[ny][tetPiece.x + c] = 1;
+      }
+
+  // clear lines
+  let cleared = 0;
+  for (let r = TET_ROWS - 1; r >= 0; r--) {
+    if (tetBoard[r].every(v => v)) {
+      tetBoard.splice(r, 1);
+      tetBoard.unshift(new Array(TET_COLS).fill(0));
+      cleared++;
+      r++;
+    }
+  }
+  if (cleared) {
+    const pts = [0, 100, 300, 500, 800];
+    tetScore += (pts[cleared] || 800) * tetLevel;
+    tetLines += cleared;
+    tetLevel  = Math.floor(tetLines / 10) + 1;
+    tetInterval = Math.max(80, 800 - (tetLevel - 1) * 70);
+    setHUD(tetScore, tetLevel);
+    clearInterval(tetLoop);
+    tetLoop = setInterval(tetDrop, tetInterval);
+  }
+
+  tetPiece = tetNext;
+  tetNext  = tetRandomPiece();
+
+  if (!tetValid(tetPiece.shape, tetPiece.x, tetPiece.y)) {
+    tetEnd();
+    return;
+  }
+  tetDraw();
+}
+
+function tetDrop() {
+  if (!tetValid(tetPiece.shape, tetPiece.x, tetPiece.y + 1)) {
+    tetLock();
+  } else {
+    tetPiece.y++;
+    tetDraw();
+  }
+}
+
+function tetDraw() {
+  // Background
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Board border
+  ctx.strokeStyle = C.mid;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(TET_BX - 1, -1, TET_COLS * TET_CELL + 2, TET_ROWS * TET_CELL + 2);
+
+  // Grid
+  ctx.strokeStyle = C.bgDark;
+  ctx.lineWidth = 0.3;
+  for (let r = 0; r <= TET_ROWS; r++) {
+    ctx.beginPath(); ctx.moveTo(TET_BX, r*TET_CELL); ctx.lineTo(TET_BX+TET_COLS*TET_CELL, r*TET_CELL); ctx.stroke();
+  }
+  for (let c = 0; c <= TET_COLS; c++) {
+    ctx.beginPath(); ctx.moveTo(TET_BX+c*TET_CELL, 0); ctx.lineTo(TET_BX+c*TET_CELL, TET_ROWS*TET_CELL); ctx.stroke();
+  }
+
+  // Board cells
+  for (let r = 0; r < TET_ROWS; r++)
+    for (let c = 0; c < TET_COLS; c++)
+      if (tetBoard[r][c])
+        tetDrawCell(TET_BX + c * TET_CELL, r * TET_CELL);
+
+  // Ghost piece
+  let ghostY = tetPiece.y;
+  while (tetValid(tetPiece.shape, tetPiece.x, ghostY + 1)) ghostY++;
+  if (ghostY !== tetPiece.y) {
+    tetPiece.shape.forEach((row, r) => row.forEach((v, c) => {
+      if (v) {
+        const gx = TET_BX + (tetPiece.x + c) * TET_CELL;
+        const gy = (ghostY + r) * TET_CELL;
+        ctx.strokeStyle = C.mid;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(gx + 2, gy + 2, TET_CELL - 4, TET_CELL - 4);
+      }
+    }));
+  }
+
+  // Active piece
+  tetPiece.shape.forEach((row, r) => row.forEach((v, c) => {
+    if (v) tetDrawCell(TET_BX + (tetPiece.x + c) * TET_CELL, (tetPiece.y + r) * TET_CELL);
+  }));
+
+  // Info panel
+  tetDrawInfo();
+}
+
+function tetDrawCell(x, y) {
+  ctx.fillStyle = C.dark;
+  ctx.fillRect(x + 1, y + 1, TET_CELL - 2, TET_CELL - 2);
+  ctx.fillStyle = C.bgDark;
+  ctx.fillRect(x + 4, y + 4, TET_CELL - 8, TET_CELL - 8);
+}
+
+function tetDrawInfo() {
+  const ix = TET_INFO_X + 4;
+  const iw = canvas.width - ix - 4;
+
+  ctx.fillStyle = C.dark;
+  ctx.font = 'bold 10px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  const cx = ix + iw / 2;
+
+  // Next piece label
+  ctx.fillText('NEXT', cx, 20);
+
+  // Next piece preview box
+  const previewSize = 4 * TET_CELL;
+  const px = ix;
+  const py = 26;
+  ctx.strokeStyle = C.mid;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(px, py, iw, previewSize);
+
+  // draw next piece centered in box
+  const ns = tetNext.shape;
+  const offX = Math.floor((iw / TET_CELL - ns[0].length) / 2);
+  const offY = Math.floor((4 - ns.length) / 2);
+  ns.forEach((row, r) => row.forEach((v, c) => {
+    if (v) {
+      const dx = px + (offX + c) * TET_CELL;
+      const dy = py + (offY + r) * TET_CELL;
+      tetDrawCell(dx, dy);
+    }
+  }));
+
+  // Lines
+  const ly = py + previewSize + 22;
+  ctx.font = 'bold 9px "Courier New", monospace';
+  ctx.fillText('LINHAS', cx, ly);
+  ctx.font = 'bold 16px "Courier New", monospace';
+  ctx.fillText(String(tetLines), cx, ly + 18);
+
+  ctx.textAlign = 'left';
+}
+
+function tetDrawStart()    { tetInitBoard(); tetDraw(); drawBox('TETRIS',   ['Pressione OK','ou START','para jogar','',`RECORDE: ${tetHighScore}`]); }
+function tetDrawPaused()   { tetDraw();      drawBox('PAUSADO',  ['Pressione OK','para continuar']); }
+function tetDrawGameOver() { tetDraw();      drawBox('FIM DE JOGO',[`PONTOS: ${tetScore}`,`RECORDE: ${tetHighScore}`,'','Pressione OK','para jogar de','novo']); }
+
+function tetStart() {
+  if (tetState === 'playing') return;
+  tetInitBoard();
+  tetScore    = 0;
+  tetLevel    = 1;
+  tetLines    = 0;
+  tetInterval = 800;
+  tetNext     = tetRandomPiece();
+  tetPiece    = tetRandomPiece();
+  tetState    = 'playing';
+  setHUD(tetScore, tetLevel);
+  clearInterval(tetLoop);
+  tetLoop = setInterval(tetDrop, tetInterval);
+  tetDraw();
+}
+function tetPause()  { if (tetState!=='playing') return; tetState='paused'; clearInterval(tetLoop); tetDrawPaused(); }
+function tetResume() { if (tetState!=='paused')  return; tetState='playing'; tetLoop=setInterval(tetDrop,tetInterval); tetDraw(); }
+function tetEnd()    {
+  clearInterval(tetLoop);
+  tetState = 'gameover';
+  if (tetScore > tetHighScore) { tetHighScore = tetScore; localStorage.setItem('tetrisHi', tetHighScore); }
+  tetDrawGameOver();
+}
+function tetOK() {
+  if (tetState==='start'||tetState==='gameover') tetStart();
+  else if (tetState==='playing') tetPause();
+  else if (tetState==='paused')  tetResume();
+}
+function tetMoveLeft()  { if (tetState!=='playing') return; if (tetValid(tetPiece.shape,tetPiece.x-1,tetPiece.y)) { tetPiece.x--; tetDraw(); } }
+function tetMoveRight() { if (tetState!=='playing') return; if (tetValid(tetPiece.shape,tetPiece.x+1,tetPiece.y)) { tetPiece.x++; tetDraw(); } }
+function tetRotatePiece() {
+  if (tetState!=='playing') return;
+  const rot = tetRotate(tetPiece.shape);
+  // wall kick: try 0, -1, +1, -2, +2
+  for (const kick of [0,-1,1,-2,2]) {
+    if (tetValid(rot, tetPiece.x+kick, tetPiece.y)) {
+      tetPiece.shape = rot;
+      tetPiece.x += kick;
+      tetDraw();
+      return;
+    }
+  }
+}
+function tetSoftDrop() { if (tetState==='playing') tetDrop(); }
+function tetHardDrop() {
+  if (tetState!=='playing') return;
+  while (tetValid(tetPiece.shape, tetPiece.x, tetPiece.y + 1)) tetPiece.y++;
+  tetLock();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INPUT ROUTING
+// ═══════════════════════════════════════════════════════════════════════════════
+function handleUp() {
+  if (currentGame === 'menu')   menuUp();
+  else if (currentGame === 'snake')  { if (snState==='playing' && snDir.y!==1) snNextDir={x:0,y:-1}; }
+  else if (currentGame === 'tetris') tetRotatePiece();
+}
+function handleDown() {
+  if (currentGame === 'menu')   menuDown();
+  else if (currentGame === 'snake')  { if (snState==='playing' && snDir.y!==-1) snNextDir={x:0,y:1}; }
+  else if (currentGame === 'tetris') tetSoftDrop();
+}
+function handleLeft() {
+  if (currentGame === 'snake')  { if (snState==='playing' && snDir.x!==1)  snNextDir={x:-1,y:0}; }
+  else if (currentGame === 'tetris') tetMoveLeft();
+}
+function handleRight() {
+  if (currentGame === 'snake')  { if (snState==='playing' && snDir.x!==-1) snNextDir={x:1,y:0}; }
+  else if (currentGame === 'tetris') tetMoveRight();
+}
+function handleOK() {
+  if (currentGame === 'menu')   menuConfirm();
+  else if (currentGame === 'snake')  snOK();
+  else if (currentGame === 'tetris') tetOK();
+}
+function handleMenu() {
+  if (currentGame !== 'menu') {
+    // stop current game, go back to menu
+    clearInterval(snLoop);
+    clearInterval(tetLoop);
+    currentGame = 'menu';
+    setCanvasMode('snake'); // menu uses square canvas
+    menuSel = currentGame === 'tetris' ? 1 : 0;
+    menuSel = 0;
+    drawMenu();
+    setHUD(0, 1);
+  } else {
+    // already on menu
+  }
+}
+
+// ─── Keyboard ─────────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  switch (e.key) {
+    case 'ArrowUp':    case 'w': case 'W': e.preventDefault(); handleUp();    break;
+    case 'ArrowDown':  case 's': case 'S': e.preventDefault(); handleDown();  break;
+    case 'ArrowLeft':  case 'a': case 'A': e.preventDefault(); handleLeft();  break;
+    case 'ArrowRight': case 'd': case 'D': e.preventDefault(); handleRight(); break;
+    case 'Enter': case ' ':                e.preventDefault(); handleOK();    break;
+    case 'Escape':                          handleMenu();                       break;
+    case 'x': case 'X':
+      if (currentGame==='tetris') tetHardDrop();
+      break;
+  }
+});
+
+// ─── D-pad buttons ────────────────────────────────────────────────────────────
+function setupBtn(id, action) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  ['touchstart','mousedown'].forEach(ev =>
+    btn.addEventListener(ev, e => { e.preventDefault(); btn.classList.add('pressed'); action(); }, {passive:false})
+  );
+  ['touchend','mouseup','mouseleave'].forEach(ev =>
+    btn.addEventListener(ev, () => btn.classList.remove('pressed'))
+  );
+}
+
+setupBtn('btnUp',    handleUp);
+setupBtn('btnDown',  handleDown);
+setupBtn('btnLeft',  handleLeft);
+setupBtn('btnRight', handleRight);
+setupBtn('btnCenter',handleOK);
+setupBtn('btnStart', handleOK);
+setupBtn('btnMenu',  handleMenu);
+
+// ─── Touch swipe on canvas ────────────────────────────────────────────────────
+let touchStart = null;
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  touchStart = {x: e.touches[0].clientX, y: e.touches[0].clientY};
+}, {passive:false});
+
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  if (!touchStart) return;
+  const dx = e.changedTouches[0].clientX - touchStart.x;
+  const dy = e.changedTouches[0].clientY - touchStart.y;
+  const adx = Math.abs(dx), ady = Math.abs(dy);
+
+  if (adx < 12 && ady < 12) {
+    // tap on menu: check which item was tapped
+    if (currentGame === 'menu') {
+      const rect   = canvas.getBoundingClientRect();
+      const scaleY = canvas.height / rect.height;
+      const cy     = (e.changedTouches[0].clientY - rect.top) * scaleY;
+      if      (cy < 212) { menuSel = 0; drawMenu(); setTimeout(menuConfirm, 100); }
+      else if (cy < 276) { menuSel = 1; drawMenu(); setTimeout(menuConfirm, 100); }
+      else handleOK();
+    } else {
+      handleOK();
     }
     touchStart = null;
-  }, { passive: false });
+    return;
+  }
 
-  // Prevent scroll
-  document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+  if (adx > ady) {
+    if (dx > 0) handleRight(); else handleLeft();
+  } else {
+    if (dy > 0) handleDown(); else handleUp();
+  }
+  touchStart = null;
+}, {passive:false});
 
-  // Boot
-  state = 'start';
-  init();
-  drawStart();
+document.addEventListener('touchmove', e => e.preventDefault(), {passive:false});
 
-  // Redraw food blink on start screen
-  setInterval(() => {
-    if (state === 'start') drawStart();
-    else if (state === 'gameover') drawGameOver();
-  }, 400);
+// ─── Blink loop ───────────────────────────────────────────────────────────────
+setInterval(() => {
+  if (currentGame === 'menu')            drawMenu();
+  else if (currentGame === 'snake') {
+    if (snState==='start')               snDrawStart();
+    else if (snState==='gameover')       snDrawGameOver();
+    else if (snState==='playing')        snDraw(); // food blink
+  }
+}, 400);
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+setCanvasMode('snake');
+drawMenu();
 </script>
 </body>
 </html>
