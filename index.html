@@ -172,6 +172,36 @@
       transform: translateY(3px);
       box-shadow: 0 1px 0 #1a1a1a;
     }
+
+    .drop-btn {
+      background: #3a3a3a;
+      border: none;
+      border-radius: 12px;
+      width: 180px;
+      height: 52px;
+      cursor: pointer;
+      color: #bbb;
+      font-size: 22px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      box-shadow:
+        0 4px 0 #1a1a1a,
+        inset 0 1px 0 rgba(255,255,255,0.1);
+      transition: transform 0.05s, box-shadow 0.05s;
+      touch-action: manipulation;
+      display: none;
+    }
+
+    .drop-btn:active,
+    .drop-btn.pressed {
+      transform: translateY(3px);
+      box-shadow: 0 1px 0 #1a1a1a;
+      background: #4a4a4a;
+    }
+
+    .drop-btn.visible {
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -200,6 +230,8 @@
     <button class="dpad-btn" id="btnDown">▼</button>
     <div class="dpad-btn dpad-empty"></div>
   </div>
+
+  <button class="drop-btn" id="btnDrop">▼▼ DROP</button>
 
   <div class="bottom-buttons">
     <button class="action-btn" id="btnMenu">MENU</button>
@@ -348,6 +380,7 @@ snHighScore = parseInt(localStorage.getItem('snakeHi') || '0');
 function launchSnake() {
   currentGame = 'snake';
   setCanvasMode('snake');
+  document.getElementById('btnDrop').classList.remove('visible');
   snState = 'start';
   snInit();
   snDrawStart();
@@ -485,6 +518,7 @@ tetHighScore = parseInt(localStorage.getItem('tetrisHi') || '0');
 function launchTetris() {
   currentGame = 'tetris';
   setCanvasMode('tetris');
+  document.getElementById('btnDrop').classList.add('visible');
   tetState = 'start';
   tetInitBoard();
   setHUD(0, 1);
@@ -759,7 +793,7 @@ function handleMenu() {
     clearInterval(tetLoop);
     currentGame = 'menu';
     setCanvasMode('snake'); // menu uses square canvas
-    menuSel = currentGame === 'tetris' ? 1 : 0;
+    document.getElementById('btnDrop').classList.remove('visible');
     menuSel = 0;
     drawMenu();
     setHUD(0, 1);
@@ -802,6 +836,7 @@ setupBtn('btnRight', handleRight);
 setupBtn('btnCenter',handleOK);
 setupBtn('btnStart', handleOK);
 setupBtn('btnMenu',  handleMenu);
+setupBtn('btnDrop',  () => { if (currentGame === 'tetris') tetHardDrop(); });
 
 // ─── Touch swipe on canvas ────────────────────────────────────────────────────
 let touchStart = null;
