@@ -22,7 +22,8 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      min-height: 100dvh;
+      height: 100svh;
+      padding-bottom: env(safe-area-inset-bottom, 12px);
       font-family: 'Courier New', monospace;
       overflow: hidden;
       touch-action: none;
@@ -31,7 +32,7 @@
     .phone-frame {
       background: #2a2a2a;
       border-radius: 32px;
-      padding: 16px;
+      padding: 12px;
       box-shadow:
         0 0 0 2px #1a1a1a,
         0 8px 32px rgba(0,0,0,0.6),
@@ -39,9 +40,11 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 12px;
+      gap: 8px;
       max-width: 420px;
       width: 98vw;
+      max-height: 100%;
+      overflow-y: auto;
     }
 
     .screen-bezel {
@@ -58,6 +61,7 @@
       position: relative;
       width: 100%;
       aspect-ratio: 1;
+      max-height: 38svh;
       overflow: hidden;
       image-rendering: pixelated;
       transition: aspect-ratio 0.15s;
@@ -99,9 +103,9 @@
 
     .dpad {
       display: grid;
-      grid-template-columns: repeat(3, 72px);
-      grid-template-rows: repeat(3, 72px);
-      gap: 5px;
+      grid-template-columns: repeat(3, 64px);
+      grid-template-rows: repeat(3, 64px);
+      gap: 4px;
     }
 
     .dpad-btn {
@@ -112,7 +116,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 28px;
+      font-size: 26px;
       color: #bbb;
       box-shadow:
         0 4px 0 #1a1a1a,
@@ -173,34 +177,39 @@
       box-shadow: 0 1px 0 #1a1a1a;
     }
 
-    .drop-btn {
+    .tetris-btns {
+      display: none;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .tetris-btns.visible {
+      display: flex;
+    }
+
+    .tetris-btn {
+      flex: 1;
       background: #3a3a3a;
       border: none;
       border-radius: 12px;
-      width: 180px;
       height: 52px;
       cursor: pointer;
       color: #bbb;
-      font-size: 22px;
+      font-size: 14px;
       font-weight: bold;
-      letter-spacing: 2px;
+      letter-spacing: 1px;
       box-shadow:
         0 4px 0 #1a1a1a,
         inset 0 1px 0 rgba(255,255,255,0.1);
       transition: transform 0.05s, box-shadow 0.05s;
       touch-action: manipulation;
-      display: none;
     }
 
-    .drop-btn:active,
-    .drop-btn.pressed {
+    .tetris-btn:active,
+    .tetris-btn.pressed {
       transform: translateY(3px);
       box-shadow: 0 1px 0 #1a1a1a;
       background: #4a4a4a;
-    }
-
-    .drop-btn.visible {
-      display: block;
     }
   </style>
 </head>
@@ -231,7 +240,10 @@
     <div class="dpad-btn dpad-empty"></div>
   </div>
 
-  <button class="drop-btn" id="btnDrop">▼▼ DROP</button>
+  <div class="tetris-btns" id="tetrisBtns">
+    <button class="tetris-btn" id="btnHold">HOLD</button>
+    <button class="tetris-btn" id="btnDrop">▼▼ DROP</button>
+  </div>
 
   <div class="bottom-buttons">
     <button class="action-btn" id="btnMenu">MENU</button>
@@ -380,7 +392,7 @@ snHighScore = parseInt(localStorage.getItem('snakeHi') || '0');
 function launchSnake() {
   currentGame = 'snake';
   setCanvasMode('snake');
-  document.getElementById('btnDrop').classList.remove('visible');
+  document.getElementById('tetrisBtns').classList.remove('visible');
   snState = 'start';
   snInit();
   snDrawStart();
@@ -512,13 +524,13 @@ const PIECES = [
   { shape: [[0,0,1],[1,1,1]],     name:'L' },
 ];
 
-let tetState, tetBoard, tetPiece, tetNext, tetScore, tetHighScore, tetLevel, tetLines, tetInterval, tetLoop, tetLockTimer;
+let tetState, tetBoard, tetPiece, tetNext, tetHeld, tetHasHeld, tetScore, tetHighScore, tetLevel, tetLines, tetInterval, tetLoop;
 tetHighScore = parseInt(localStorage.getItem('tetrisHi') || '0');
 
 function launchTetris() {
   currentGame = 'tetris';
   setCanvasMode('tetris');
-  document.getElementById('btnDrop').classList.add('visible');
+  document.getElementById('tetrisBtns').classList.add('visible');
   tetState = 'start';
   tetInitBoard();
   setHUD(0, 1);
@@ -588,8 +600,9 @@ function tetLock() {
     tetLoop = setInterval(tetDrop, tetInterval);
   }
 
-  tetPiece = tetNext;
-  tetNext  = tetRandomPiece();
+  tetPiece   = tetNext;
+  tetNext    = tetRandomPiece();
+  tetHasHeld = false;
 
   if (!tetValid(tetPiece.shape, tetPiece.x, tetPiece.y)) {
     tetEnd();
@@ -667,43 +680,77 @@ function tetDrawCell(x, y) {
 function tetDrawInfo() {
   const ix = TET_INFO_X + 4;
   const iw = canvas.width - ix - 4;
+  const cx = ix + iw / 2;
 
   ctx.fillStyle = C.dark;
   ctx.font = 'bold 10px "Courier New", monospace';
   ctx.textAlign = 'center';
-  const cx = ix + iw / 2;
 
-  // Next piece label
-  ctx.fillText('NEXT', cx, 20);
-
-  // Next piece preview box
+  // ── NEXT ──────────────────────────────────────
+  ctx.fillText('NEXT', cx, 14);
   const previewSize = 4 * TET_CELL;
-  const px = ix;
-  const py = 26;
+  const px = ix, py = 18;
   ctx.strokeStyle = C.mid;
   ctx.lineWidth = 1;
   ctx.strokeRect(px, py, iw, previewSize);
 
-  // draw next piece centered in box
   const ns = tetNext.shape;
-  const offX = Math.floor((iw / TET_CELL - ns[0].length) / 2);
-  const offY = Math.floor((4 - ns.length) / 2);
+  const nOffX = Math.floor((iw / TET_CELL - ns[0].length) / 2);
+  const nOffY = Math.floor((4 - ns.length) / 2);
   ns.forEach((row, r) => row.forEach((v, c) => {
-    if (v) {
-      const dx = px + (offX + c) * TET_CELL;
-      const dy = py + (offY + r) * TET_CELL;
-      tetDrawCell(dx, dy);
-    }
+    if (v) tetDrawCell(px + (nOffX + c) * TET_CELL, py + (nOffY + r) * TET_CELL);
   }));
 
-  // Lines
-  const ly = py + previewSize + 22;
+  // ── LINHAS ────────────────────────────────────
+  const ly = py + previewSize + 14;
   ctx.font = 'bold 9px "Courier New", monospace';
   ctx.fillText('LINHAS', cx, ly);
-  ctx.font = 'bold 16px "Courier New", monospace';
-  ctx.fillText(String(tetLines), cx, ly + 18);
+  ctx.font = 'bold 15px "Courier New", monospace';
+  ctx.fillText(String(tetLines), cx, ly + 16);
+
+  // ── HOLD ──────────────────────────────────────
+  const hy = ly + 16 + 16;
+  ctx.font = 'bold 10px "Courier New", monospace';
+  ctx.fillStyle = tetHasHeld ? C.mid : C.dark;
+  ctx.fillText('HOLD', cx, hy);
+
+  const hpy = hy + 4;
+  ctx.strokeStyle = tetHasHeld ? C.bgDark : C.mid;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(px, hpy, iw, previewSize);
+
+  if (tetHeld) {
+    const hs = tetHeld;
+    const hOffX = Math.floor((iw / TET_CELL - hs[0].length) / 2);
+    const hOffY = Math.floor((4 - hs.length) / 2);
+    ctx.globalAlpha = tetHasHeld ? 0.4 : 1.0;
+    hs.forEach((row, r) => row.forEach((v, c) => {
+      if (v) tetDrawCell(px + (hOffX + c) * TET_CELL, hpy + (hOffY + r) * TET_CELL);
+    }));
+    ctx.globalAlpha = 1.0;
+  }
 
   ctx.textAlign = 'left';
+}
+
+function tetHoldPiece() {
+  if (tetState !== 'playing' || tetHasHeld) return;
+  tetHasHeld = true;
+  if (tetHeld === null) {
+    tetHeld  = tetPiece.shape.map(r => [...r]);
+    tetPiece = tetNext;
+    tetNext  = tetRandomPiece();
+  } else {
+    const prev = tetHeld;
+    tetHeld    = tetPiece.shape.map(r => [...r]);
+    tetPiece   = {
+      shape: prev,
+      x: Math.floor((TET_COLS - prev[0].length) / 2),
+      y: 0,
+    };
+  }
+  if (!tetValid(tetPiece.shape, tetPiece.x, tetPiece.y)) { tetEnd(); return; }
+  tetDraw();
 }
 
 function tetDrawStart()    { tetInitBoard(); tetDraw(); drawBox('TETRIS',   ['Pressione OK','ou START','para jogar','',`RECORDE: ${tetHighScore}`]); }
@@ -717,6 +764,8 @@ function tetStart() {
   tetLevel    = 1;
   tetLines    = 0;
   tetInterval = 800;
+  tetHeld     = null;
+  tetHasHeld  = false;
   tetNext     = tetRandomPiece();
   tetPiece    = tetRandomPiece();
   tetState    = 'playing';
@@ -793,7 +842,7 @@ function handleMenu() {
     clearInterval(tetLoop);
     currentGame = 'menu';
     setCanvasMode('snake'); // menu uses square canvas
-    document.getElementById('btnDrop').classList.remove('visible');
+    document.getElementById('tetrisBtns').classList.remove('visible');
     menuSel = 0;
     drawMenu();
     setHUD(0, 1);
@@ -813,6 +862,9 @@ document.addEventListener('keydown', e => {
     case 'Escape':                          handleMenu();                       break;
     case 'x': case 'X':
       if (currentGame==='tetris') tetHardDrop();
+      break;
+    case 'c': case 'C':
+      if (currentGame==='tetris') tetHoldPiece();
       break;
   }
 });
@@ -837,6 +889,7 @@ setupBtn('btnCenter',handleOK);
 setupBtn('btnStart', handleOK);
 setupBtn('btnMenu',  handleMenu);
 setupBtn('btnDrop',  () => { if (currentGame === 'tetris') tetHardDrop(); });
+setupBtn('btnHold',  () => { if (currentGame === 'tetris') tetHoldPiece(); });
 
 // ─── Touch swipe on canvas ────────────────────────────────────────────────────
 let touchStart = null;
